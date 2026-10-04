@@ -258,7 +258,7 @@ const RX={
   addr:/(地址|Add|Address|地\s*址)|(省|市|区|县|路|街|号|大道|大厦|园区|楼|室)/,
   company:/(公司|集团|有限|股份|大学|学院|医院|研究所|研究院|中心|事务所|银行|基金|资本|Inc\.?|Ltd\.?|LLC|Co\.|Corporation|Corp\.?|Group|University|Hospital|Institute|Biotech|Pharma|Therapeutics|Capital|Partners|Bank)/i,
   title:/(经理|总监|主任|总裁|董事|教授|医生|医师|工程师|主管|主席|院长|所长|科长|处长|部长|总经理|副总|首席|创始人|合伙人|顾问|代表|研究员|秘书|专员|CEO|CTO|CFO|COO|CSO|CMO|VP|Director|Manager|President|Professor|Officer|Founder|Partner|Head|Lead|Engineer|Scientist|Consultant|Chairman|Associate|Analyst|Representative)/i,
-  dept:/(部|处|科|室|事业部|Department|Dept\.?|Division)$/i,
+  dept:/(部|处|科|室|事业部|Department|Dept\.?|Division|Development|Operations|Affairs|Research|Marketing|Sales|Laboratory|Lab)$/i,
   hanName:/^[\u4e00-\u9fa5·]{2,4}$/,
   enName:/^[A-Z][a-zA-Z'-]+( [A-Z][a-zA-Z.'-]*){1,2}$/
 };
@@ -268,6 +268,47 @@ function emailCompact(t){
   return t.replace(/[\uFF20\u00A9\u00AE]/g,'@').replace(/\(at\)|\[at\]/gi,'@')
     .replace(/[\uFF0C\u3002\u00B7\u30FB\uFF0E]/g,'.').replace(/\s+/g,'')
     .replace(/^(e-?mail|email|mail|\u90AE\u7BB1|\u7535\u90AE|\u90AE\u4EF6|E)[:\uFF1A]?/i,'');
+}
+const NOT_NAME=new Set(('chief executive officer scientific medical technical technology operating financial marketing commercial '+
+ 'senior junior vice general global regional international national deputy assistant associate executive managing principal '+
+ 'business development sales marketing operations affairs clinical research regulatory quality manufacturing production '+
+ 'department division center centre office team group unit lab laboratory company corporation limited ltd inc co llc '+
+ 'biotech biotechnology pharma pharmaceutical pharmaceuticals therapeutics biosciences bioscience sciences science medicine '+
+ 'university hospital institute school college academy foundation capital partners ventures bank fund investment investments '+
+ 'china shanghai beijing shenzhen guangzhou hong kong vancouver canada usa road street avenue building floor room suite district '+
+ 'tel fax mobile email phone www http https and of the for in at').split(' '));
+const PREFIX=/^(dr|prof|mr|mrs|ms|miss)\.?\s+/i;
+const SUFFIX=/[,，\s]+(ph\.?\s?d|m\.?\s?d|mba|msc|m\.?\s?sc|bsc|pharm\.?\s?d|d\.?\s?v\.?\s?m|jr|sr|ii|iii|esq|cpa|cfa|facs|frcpc)\.?(?=$|[,，\s])/gi;
+function cleanEnName(t){
+  let x=t.trim().replace(PREFIX,'');
+  for(let k=0;k<3;k++)x=x.replace(SUFFIX,'');
+  x=x.replace(/[,，\s]+$/,'').trim();
+  const m=x.match(/^([A-Z][A-Za-z'’-]+)\s*[,，]\s*([A-Z][A-Za-z'’-]+(?:\s+[A-Z][A-Za-z.'’-]*)?)$/);
+  if(m)x=m[2]+' '+m[1];
+  return x;
+}
+function isEnName(x){
+  if(!x||/\d|@|[\u4e00-\u9fa5]/.test(x))return false;
+  const w=x.split(/\s+/);
+  if(w.length<1||w.length>4)return false;
+  return w.every(t=>/^[A-Z][A-Za-z'’-]*\.?$/.test(t)&&!NOT_NAME.has(t.replace(/\.$/,'').toLowerCase()));
+}
+function pickEnName(lines,used,han){
+  let best=null;
+  lines.forEach((L,i)=>{
+    if(used.has(i))return;
+    const raw=L.text.trim(); if(!raw)return;
+    const parts=raw.split(/\s*[|｜/·•]\s*/);
+    let name=cleanEnName(parts[0]), title=parts.slice(1).join(' / ').trim();
+    if(!isEnName(name))return;
+    const words=name.split(/\s+/).length;
+    let score=(L.h||0);
+    if(words>=2&&words<=3)score+=40; else if(words===1)score-=30;
+    if(han&&Math.abs((L.y||0)-(han.y||0))<(han.h||40)*2.5)score+=30;
+    if(name===name.toUpperCase()&&words>=2)score+=5;
+    if(!best||score>best.score)best={i,name,title:RX.title.test(title)?title:'',score};
+  });
+  return best;
 }
 function parseLines(lines){
   const out={};FIELDS.forEach(f=>out[f]='');
@@ -309,14 +350,16 @@ function parseLines(lines){
   });
   lines.forEach((L,i)=>{
     if(used.has(i))return; const t=L.text.trim();
+    const sp=t.split(/\s*[|｜/·•]\s*/);
+    if(sp.length>1&&isEnName(cleanEnName(sp[0])))return;
     if(RX.title.test(t)&&t.length<=40){out.title=out.title?out.title+' / '+t:t;used.add(i);}
     else if(RX.dept.test(t)&&t.length<=20&&!out.department){out.department=t;used.add(i);}
   });
   const cand=lines.map((L,i)=>({...L,i,t:L.text.replace(/\s/g,'')})).filter(L=>!used.has(L.i));
   const han=cand.filter(L=>RX.hanName.test(L.t)).sort((a,b)=>b.h-a.h)[0];
   if(han){out.name=han.t;used.add(han.i);}
-  const en=lines.map((L,i)=>({...L,i,t:L.text.trim()})).filter(L=>!used.has(L.i)&&RX.enName.test(L.t)&&!RX.title.test(L.t)&&!RX.company.test(L.t)).sort((a,b)=>b.h-a.h)[0];
-  if(en){out.nameEn=en.t;used.add(en.i);}
+  const en=pickEnName(lines,used,han);
+  if(en){out.nameEn=en.name;used.add(en.i);if(en.title&&!out.title)out.title=en.title;}
   if(!out.name&&!out.nameEn){const big=cand.filter(L=>!used.has(L.i)&&L.t.length<=12).sort((a,b)=>b.h-a.h)[0];if(big){out.name=big.t;used.add(big.i);}}
   const rest=lines.filter((L,i)=>!used.has(i)).map(L=>L.text.trim()).filter(Boolean);
   return {out,rest};
