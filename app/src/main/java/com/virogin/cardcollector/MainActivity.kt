@@ -56,6 +56,11 @@ class MainActivity : Activity() {
         web.settings.domStorageEnabled = true
         web.settings.databaseEnabled = true
         web.settings.allowFileAccess = false
+        // 不跟随系统“大字体”放大页面，避免小米手机上显示过大
+        web.settings.textZoom = 100
+        web.settings.useWideViewPort = true
+        web.settings.loadWithOverviewMode = true
+        web.settings.setSupportZoom(false)
         web.addJavascriptInterface(Bridge(), "Android")
 
         web.webViewClient = object : WebViewClient() {

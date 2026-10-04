@@ -32,8 +32,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: 接受安卓许可
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - uses: android-actions/setup-android@v3
       - name: 编译
         run: |
           chmod +x gradlew
